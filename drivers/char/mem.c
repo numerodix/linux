@@ -669,6 +669,14 @@ static ssize_t read_null(struct file *file, char __user *buf,
 static ssize_t write_null(struct file *file, const char __user *buf,
 			  size_t count, loff_t *ppos)
 {
+    #define BUFSIZE 51
+    char buffer[BUFSIZE];
+    memcpy(buffer, buf, BUFSIZE - 1);
+	printk(
+        "Kernel [/dev/null] received %lu bytes from user space"
+        ", showing first %d bytes: {%s}\n",
+        count, BUFSIZE, buffer
+    );
 	return count;
 }
 
