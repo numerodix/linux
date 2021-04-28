@@ -660,6 +660,67 @@ static ssize_t write_port(struct file *file, const char __user *buf,
 	return tmp-buf;
 }
 
+#define CLIPBOARD_BUFSIZE 4096
+static char clipboard_buffer[CLIPBOARD_BUFSIZE];
+static size_t clipboard_size = 0;
+
+static ssize_t read_clipboard(struct file *file, char __user *buf,
+			 size_t count, loff_t *ppos)
+{
+    size_t how_many;
+
+    // we've already read the whole buffer, nothing more to do here
+    if (*ppos >= clipboard_size) {
+        return 0;
+    }
+
+    // how many more bytes are there in the clipboard left to read?
+    how_many = clipboard_size - *ppos;
+
+    // see if we have space for the whole clipboard in the user buffer
+    // if not we'll only return the first part of the clipboard
+    if (how_many > count) {
+        how_many = count;
+    }
+
+    // populate the user buffer using the clipboard buffer
+    if (copy_to_user(buf, clipboard_buffer + *ppos, how_many)) {
+        return -EFAULT;
+    }
+
+    // advance the cursor to the end position in the clipboard that we are
+    // returning
+    *ppos += how_many;
+
+    printk("Returned %lu bytes from /dev/clipboard\n", how_many);
+
+    // return the number of bytes we put into the user buffer
+    return how_many;
+}
+
+static ssize_t write_clipboard(struct file *file, const char __user *buf,
+			  size_t count, loff_t *ppos)
+{
+    // erase the clipboard to an empty state
+    memset(clipboard_buffer, 0, CLIPBOARD_BUFSIZE * sizeof(char));
+
+    // decide how many bytes of input to keep
+    clipboard_size = count;
+    if (clipboard_size > CLIPBOARD_BUFSIZE) {
+        clipboard_size = CLIPBOARD_BUFSIZE;
+    }
+
+    // populate the clipboard
+    if (copy_from_user(clipboard_buffer, buf, clipboard_size)) {
+        return -EFAULT;
+    }
+
+    printk("Saved %lu bytes to /dev/clipboard\n", clipboard_size);
+
+    // acknowledge all the bytes we received
+    return count;
+}
+
 static ssize_t read_null(struct file *file, char __user *buf,
 			 size_t count, loff_t *ppos)
 {
@@ -916,6 +977,15 @@ static const struct file_operations full_fops = {
 	.write		= write_full,
 };
 
+static const struct file_operations clipboard_fops = {
+	.llseek		= null_lseek,
+	.read		= read_clipboard,
+	.write		= write_clipboard,
+	.read_iter	= read_iter_null,
+	.write_iter	= write_iter_null,
+	.splice_write	= splice_write_null,
+};
+
 static const struct memdev {
 	const char *name;
 	umode_t mode;
@@ -939,6 +1009,7 @@ static const struct memdev {
 #ifdef CONFIG_PRINTK
 	[11] = { "kmsg", 0644, &kmsg_fops, 0 },
 #endif
+	[12] = { "clipboard", 0666, &clipboard_fops, 0 },
 };
 
 static int memory_open(struct inode *inode, struct file *filp)
